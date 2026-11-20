@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Búsqueda del Tesoro</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#14213d;color:#fff;min-height:100vh;display:flex;justify-content:center}
+main{width:100%;max-width:480px;padding:24px 20px}
+h1{font-size:22px;margin:0 0 4px}.sub{opacity:.7;margin:0 0 20px;font-size:14px}
+.card{background:#1f3159;border-radius:16px;padding:20px;margin-bottom:16px}
+.clue{font-size:22px;line-height:1.4;white-space:pre-wrap}
+.badge{display:inline-block;background:#fca311;color:#14213d;font-weight:700;border-radius:99px;padding:4px 12px;font-size:13px;margin-bottom:12px}
+input,button{font:inherit;width:100%;padding:14px;border-radius:12px;border:0;margin-top:10px}
+input{text-transform:uppercase;text-align:center;letter-spacing:3px;font-size:20px}
+button{background:#fca311;color:#14213d;font-weight:700;cursor:pointer}
+.ok{background:#2a9d8f}.bad{background:#c1443d}.warn{background:#6c757d}
+.banner{border-radius:12px;padding:14px;margin-bottom:16px;font-weight:600}
+.bar{height:8px;background:#0e1a33;border-radius:99px;overflow:hidden;margin-top:14px}.bar i{display:block;height:100%;background:#fca311}
+.err{color:#ff9b94;margin-top:8px;font-size:14px}
+</style></head><body><main id="app"></main>
+<script>
+const app = document.getElementById('app');
+const scanToken = location.pathname.startsWith('/q/') ? location.pathname.split('/')[2] : null;
+let banner = null, pollTimer = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const data = await r.json().catch(() => ({}));
+  return { status: r.status, data };
+}
+const fmt = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)} min ${s % 60} s`; };
+
+function renderJoin(error) {
+  clearInterval(pollTimer);
+  app.innerHTML = `<h1>🗺️ Búsqueda del Tesoro</h1><p class="sub">Ingresá el código de tu equipo</p>
+  <div class="card"><input id="code" placeholder="CÓDIGO" autocapitalize="characters" autocomplete="off">
+  <button id="go">Entrar</button><div class="err">${error || ''}</div></div>`;
+  document.getElementById('go').onclick = async () => {
+    const { status, data } = await api('/api/join', { code: document.getElementById('code').value });
+    if (status !== 200) return renderJoin(data.error);
+    await afterJoin();
+  };
+}
+
+function bannerHtml() {
+  if (!banner) return '';
+  const map = {
+    ok: ['ok', '✅ ¡Correcto! Encontraron el QR.'],
+    wrong: ['bad', '❌ Este no es el QR que buscan ahora. ¡Sigan buscando!'],
+    already: ['warn', 'ℹ️ Este QR ya lo escanearon. Sigan con la pista actual.'],
+    not_started: ['warn', '⏳ El juego todavía no empezó.'],
+    unknown: ['bad', '❌ QR no reconocido.'],
+    finished: ['ok', '🏁 Ya terminaron el recorrido.']
+  };
+  const [cls, txt] = map[banner] || [];
+  return txt ? `<div class="banner ${cls}">${txt}</div>` : '';
+}
+
+function render(s) {
+  clearInterval(pollTimer);
+  const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
+  if (s.status === 'waiting') {
+    app.innerHTML = `<h1>${s.team.name}</h1><p class="sub">Esperando que arranque el juego…</p>${bannerHtml()}
+    <div class="card">⏳ Cuando el organizador inicie, acá va a aparecer la primera pista.</div>`;
+    pollTimer = setInterval(refresh, 4000);
+  } else if (s.status === 'playing') {
+    app.innerHTML = `<h1>${s.team.name}</h1><p class="sub">Pista ${s.step} de ${s.total}</p>${bannerHtml()}
+    <div class="card"><span class="badge">PISTA ${s.step}</span><div class="clue"></div>
+    <div class="bar"><i style="width:${pct}%"></i></div></div>
+    <p class="sub">Cuando encuentren el QR, escanéenlo con la cámara del celular.</p>`;
+    app.querySelector('.clue').textContent = s.clue;
+    pollTimer = setInterval(refresh, 6000);
+  } else {
+    app.innerHTML = `<h1>🏆 ${s.team.name}</h1>${bannerHtml()}
+    <div class="card"><div class="clue"></div><p class="sub" style="margin-top:14px">Tiempo: <b>${fmt(s.elapsed_ms)}</b></p></div>`;
+    app.querySelector('.clue').textContent = s.final_message;
+  }
+}
+
+async function refresh() {
+  const { status, data } = await api('/api/state');
+  if (status === 401) return renderJoin();
+  const prevKey = app.dataset.key;
+  const key = data.status + ':' + (data.step || '');
+  if (key !== prevKey) { app.dataset.key = key; banner = null; }
+  else if (data.status === 'playing') return; // sin cambios, no re-render
+  render(data);
+}
+
+async function afterJoin() {
+  if (scanToken) {
+    const { status, data } = await api('/api/scan', { token: scanToken });
+    if (status === 401) return renderJoin();
+    banner = data.result;
+    app.dataset.key = data.status + ':' + (data.step || '');
+    history.replaceState(null, '', '/'); // evita reescanear al recargar
+    return render(data);
+  }
+  refresh();
+}
+
+(async () => {
+  const { status } = await api('/api/state');
+  if (status === 401) return renderJoin();
+  afterJoin();
+})();
+</script></body></html>

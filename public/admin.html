@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin – Tesoro</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;margin:0;background:#f4f5f7;color:#1a1a1a}
+header{background:#14213d;color:#fff;padding:12px 20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+main{max-width:1100px;margin:0 auto;padding:20px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);margin-bottom:16px}
+h2{margin:0 0 10px;font-size:16px}
+input,textarea,select{font:inherit;padding:8px;border:1px solid #ccc;border-radius:8px;width:100%}
+textarea{resize:vertical;min-height:60px}
+button,a.btn{font:inherit;padding:8px 14px;border-radius:8px;border:0;background:#fca311;color:#14213d;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}
+button.sec{background:#e5e7eb}button.danger{background:#c1443d;color:#fff}
+.row{display:grid;grid-template-columns:28px 1fr 90px 30px;gap:6px;margin-bottom:8px;align-items:start}
+.pos{font-weight:700;padding-top:8px;text-align:center}
+.f{display:flex;gap:8px;margin-bottom:8px}.f>*{flex:1}
+.prog{font-size:14px;margin:4px 0}.done{color:#2a9d8f;font-weight:600}
+.muted{color:#777;font-size:13px}
+.login{max-width:320px;margin:80px auto}
+</style></head><body>
+<div id="root"></div>
+<script>
+const root = document.getElementById('root');
+let data = null;
+const api = async (path, method = 'GET', body) => {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  return { status: r.status, data: await r.json().catch(() => ({})) };
+};
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function login(err) {
+  root.innerHTML = `<div class="card login"><h2>Admin</h2><input id="pw" type="password" placeholder="Contraseña">
+  <p style="color:#c1443d">${err || ''}</p><button id="go">Entrar</button></div>`;
+  const go = async () => { const r = await api('/api/admin/login', 'POST', { password: pw.value }); r.status === 200 ? load() : login(r.data.error); };
+  document.getElementById('go').onclick = go; pw.onkeydown = (e) => e.key === 'Enter' && go();
+}
+
+async function load() {
+  const r = await api('/api/admin/data');
+  if (r.status === 401) return login();
+  data = r.data; build();
+}
+
+function qrOptions(sel) {
+  let o = '<option value="">—</option>';
+  for (let i = 1; i <= data.qr_count; i++) o += `<option value="${i}" ${sel == i ? 'selected' : ''}>QR #${i}</option>`;
+  return o;
+}
+
+function stepRow(t, s, i) {
+  return `<div class="row" data-team="${t}"><div class="pos">${i + 1}</div>
+  <textarea placeholder="Texto de la pista ${i + 1}">${esc(s.clue)}</textarea>
+  <select>${qrOptions(s.qr_id)}</select><button class="sec" title="Quitar" onclick="this.parentNode.remove();renum(${t})">×</button></div>`;
+}
+function renum(t) { document.querySelectorAll(`#steps-${t} .row`).forEach((r, i) => r.querySelector('.pos').textContent = i + 1); }
+function addStep(t) { const box = document.getElementById('steps-' + t); box.insertAdjacentHTML('beforeend', stepRow(t, {}, box.children.length)); }
+
+function build() {
+  root.innerHTML = `<header><h1>🗺️ Búsqueda del Tesoro – Admin</h1>
+  <a class="btn" href="/admin/print" target="_blank">🖨️ Imprimir QRs</a>
+  <button onclick="startAll()">▶️ Iniciar juego</button>
+  <button class="danger" onclick="resetAll()">↺ Reiniciar</button></header>
+  <main><div class="card"><h2>Progreso en vivo</h2><div id="progress"></div></div>
+  <div class="grid">${data.teams.map((t) => `<div class="card">
+    <h2>${esc(t.name)}</h2>
+    <div class="f"><div><label class="muted">Nombre</label><input id="name-${t.id}" value="${esc(t.name)}"></div>
+    <div><label class="muted">Código (lo ingresan los jugadores)</label><input id="code-${t.id}" value="${esc(t.code)}"></div></div>
+    <label class="muted">Pistas en orden: cada pista dice dónde está su QR</label>
+    <div id="steps-${t.id}">${t.steps.map((s, i) => stepRow(t.id, s, i)).join('')}</div>
+    <div class="f"><button class="sec" onclick="addStep(${t.id})">+ Agregar pista</button></div>
+    <label class="muted">Mensaje final (al escanear el último QR)</label>
+    <textarea id="final-${t.id}">${esc(t.final_message)}</textarea>
+    <p><button onclick="saveTeam(${t.id})">💾 Guardar ${esc(t.name)}</button> <span id="msg-${t.id}" class="muted"></span></p>
+  </div>`).join('')}</div></main>`;
+  renderProgress();
+}
+
+function renderProgress() {
+  const el = document.getElementById('progress'); if (!el) return;
+  const fmt = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}m ${s % 60}s`; };
+  el.innerHTML = '<div class="grid">' + data.teams.map((t) => {
+    const done = t.steps.filter((s) => s.scanned_at).length;
+    const state = !t.started_at ? 'sin iniciar' : t.finished_at ? `🏁 terminó en ${fmt(t.finished_at - t.started_at)}` : `en juego (${fmt(Date.now() - t.started_at)})`;
+    return `<div><b>${esc(t.name)}</b> — ${done}/${t.steps.length} — ${state}` +
+      t.steps.map((s) => `<div class="prog ${s.scanned_at ? 'done' : ''}">${s.scanned_at ? '✔' : '○'} Pista ${s.pos} → QR #${s.qr_id ?? '?'} ${s.scanned_at ? '(' + new Date(s.scanned_at).toLocaleTimeString() + ')' : ''}</div>`).join('') + '</div>';
+  }).join('') + '</div>';
+}
+
+async function saveTeam(id) {
+  const steps = [...document.querySelectorAll(`#steps-${id} .row`)].map((r) => ({ clue: r.querySelector('textarea').value, qr_id: r.querySelector('select').value }));
+  const missing = steps.findIndex((s) => !s.clue.trim() || !s.qr_id);
+  const m = document.getElementById('msg-' + id);
+  if (missing >= 0) { m.textContent = `⚠️ Falta completar la pista ${missing + 1}`; return; }
+  const r = await api('/api/admin/teams/' + id, 'PUT', { name: document.getElementById('name-' + id).value, code: document.getElementById('code-' + id).value, final_message: document.getElementById('final-' + id).value, steps });
+  m.textContent = r.status === 200 ? '✅ Guardado' : '❌ ' + (r.data.error || 'error');
+  if (r.status === 200) refreshProgress();
+}
+async function refreshProgress() { const r = await api('/api/admin/data'); if (r.status === 200) { data = r.data; renderProgress(); } }
+async function startAll() { if (confirm('¿Iniciar el juego para los dos equipos?')) { await api('/api/admin/start', 'POST'); refreshProgress(); } }
+async function resetAll() { if (confirm('Esto borra todo el progreso y el cronómetro. ¿Seguro?')) { await api('/api/admin/reset', 'POST'); refreshProgress(); } }
+
+setInterval(() => document.getElementById('progress') && refreshProgress(), 5000);
+load();
+</script></body></html>
