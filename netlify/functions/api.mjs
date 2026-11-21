@@ -120,6 +120,15 @@ export default async (req) => {
       const code = String(body.code).trim().toUpperCase();
       if ((await getTeams(s)).some((t) => t.id !== id && t.code === code)) return json({ error: 'Código repetido' }, 400);
       // el progreso sigue al QR (no a la posición), así reordenar no mezcla lo ya escaneado
+      // cada QR se usa una sola vez: ni repetido en este equipo ni en otro equipo
+      const ids = (body.steps || []).map((x) => (x.qr_id ? Number(x.qr_id) : null)).filter(Boolean);
+      const dup = ids.find((q, i) => ids.indexOf(q) !== i);
+      if (dup) return json({ error: `El QR #${dup} está repetido en este equipo` }, 400);
+      const other = (await getTeams(s)).find((t) => t.id !== id && t.steps.some((x) => ids.includes(x.qr_id)));
+      if (other) {
+        const q = other.steps.find((x) => ids.includes(x.qr_id)).qr_id;
+        return json({ error: `El QR #${q} ya lo usa ${other.name}. Sacáselo y guardá ese equipo primero.` }, 400);
+      }
       const prev = new Map(team.steps.filter((x) => x.qr_id).map((x) => [x.qr_id, x.scanned_at]));
       team.name = String(body.name).trim();
       team.code = code;
