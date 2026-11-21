@@ -15,8 +15,11 @@ input,textarea,select{font:inherit;padding:8px;border:1px solid #ccc;border-radi
 textarea{resize:vertical;min-height:60px}
 button,a.btn{font:inherit;padding:8px 14px;border-radius:8px;border:0;background:#fca311;color:#14213d;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}
 button.sec{background:#e5e7eb}button.danger{background:#c1443d;color:#fff}
-.row{display:grid;grid-template-columns:28px 1fr 90px 30px;gap:6px;margin-bottom:8px;align-items:start}
-.pos{font-weight:700;padding-top:8px;text-align:center}
+.row{display:grid;grid-template-columns:34px 1fr 90px auto;gap:6px;margin-bottom:8px;align-items:start;border-radius:8px}
+.pos{font-weight:700;padding:8px 0;text-align:center;cursor:grab;user-select:none;border-radius:8px;background:#f0f1f3}
+.pos::before{content:'⋮⋮ ';color:#aaa;font-size:11px;letter-spacing:-2px}
+.row.dragging{opacity:.4}.row.over{outline:2px dashed #fca311}
+.acts{display:flex;gap:4px}.acts button{padding:8px 9px}
 .f{display:flex;gap:8px;margin-bottom:8px}.f>*{flex:1}
 .prog{font-size:14px;margin:4px 0}.done{color:#2a9d8f;font-weight:600}
 .muted{color:#777;font-size:13px}
@@ -52,11 +55,43 @@ function qrOptions(sel) {
 }
 
 function stepRow(t, s, i) {
-  return `<div class="row" data-team="${t}"><div class="pos">${i + 1}</div>
-  <textarea placeholder="Texto de la pista ${i + 1}">${esc(s.clue)}</textarea>
-  <select>${qrOptions(s.qr_id)}</select><button class="sec" title="Quitar" onclick="this.parentNode.remove();renum(${t})">×</button></div>`;
+  return `<div class="row" data-team="${t}"><div class="pos" title="Arrastrar para reordenar">${i + 1}</div>
+  <textarea placeholder="Texto de la pista">${esc(s.clue)}</textarea>
+  <select>${qrOptions(s.qr_id)}</select>
+  <div class="acts"><button class="sec" title="Subir" onclick="move(this,-1)">↑</button><button class="sec" title="Bajar" onclick="move(this,1)">↓</button>
+  <button class="sec" title="Quitar" onclick="const b=this.closest('.row').parentNode;this.closest('.row').remove();renum(b)">×</button></div></div>`;
 }
-function renum(t) { document.querySelectorAll(`#steps-${t} .row`).forEach((r, i) => r.querySelector('.pos').textContent = i + 1); }
+function renum(box) {
+  if (typeof box !== 'object') box = document.getElementById('steps-' + box);
+  box.querySelectorAll('.row').forEach((r, i) => r.querySelector('.pos').textContent = i + 1);
+  const m = document.getElementById('msg-' + box.id.split('-')[1]); if (m) m.textContent = '⚠️ Cambios sin guardar';
+}
+function move(btn, dir) {
+  const row = btn.closest('.row'), box = row.parentNode;
+  const other = dir < 0 ? row.previousElementSibling : row.nextElementSibling;
+  if (!other) return;
+  dir < 0 ? box.insertBefore(row, other) : box.insertBefore(other, row);
+  renum(box); btn.focus();
+}
+// arrastrar y soltar (tomando del número de la izquierda)
+let dragRow = null;
+document.addEventListener('mousedown', (e) => { const h = e.target.closest('.pos'); if (h) h.parentNode.draggable = true; });
+document.addEventListener('mouseup', () => document.querySelectorAll('.row[draggable]').forEach((r) => r.removeAttribute('draggable')));
+document.addEventListener('dragstart', (e) => {
+  dragRow = e.target.closest?.('.row'); if (!dragRow) return;
+  dragRow.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', '');
+});
+document.addEventListener('dragover', (e) => {
+  const over = e.target.closest?.('.row');
+  if (!dragRow || !over || over === dragRow || over.parentNode !== dragRow.parentNode) return;
+  e.preventDefault();
+  const r = over.getBoundingClientRect();
+  over.parentNode.insertBefore(dragRow, e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+});
+document.addEventListener('dragend', () => {
+  if (!dragRow) return;
+  dragRow.classList.remove('dragging'); dragRow.removeAttribute('draggable'); renum(dragRow.parentNode); dragRow = null;
+});
 function addStep(t) { const box = document.getElementById('steps-' + t); box.insertAdjacentHTML('beforeend', stepRow(t, {}, box.children.length)); }
 
 function build() {
@@ -69,7 +104,7 @@ function build() {
     <h2>${esc(t.name)}</h2>
     <div class="f"><div><label class="muted">Nombre</label><input id="name-${t.id}" value="${esc(t.name)}"></div>
     <div><label class="muted">Código (lo ingresan los jugadores)</label><input id="code-${t.id}" value="${esc(t.code)}"></div></div>
-    <label class="muted">Pistas en orden: cada pista dice dónde está su QR</label>
+    <label class="muted">Pistas en orden: cada pista dice dónde está su QR. Reordená con ↑ ↓ o arrastrando el número.</label>
     <div id="steps-${t.id}">${t.steps.map((s, i) => stepRow(t.id, s, i)).join('')}</div>
     <div class="f"><button class="sec" onclick="addStep(${t.id})">+ Agregar pista</button></div>
     <label class="muted">Mensaje final (al escanear el último QR)</label>

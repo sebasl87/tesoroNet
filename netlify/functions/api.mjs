@@ -119,12 +119,13 @@ export default async (req) => {
       if (!team) return json({ error: 'equipo no existe' }, 404);
       const code = String(body.code).trim().toUpperCase();
       if ((await getTeams(s)).some((t) => t.id !== id && t.code === code)) return json({ error: 'Código repetido' }, 400);
-      const prev = new Map(team.steps.map((x) => [x.pos, x.scanned_at]));
+      // el progreso sigue al QR (no a la posición), así reordenar no mezcla lo ya escaneado
+      const prev = new Map(team.steps.filter((x) => x.qr_id).map((x) => [x.qr_id, x.scanned_at]));
       team.name = String(body.name).trim();
       team.code = code;
       team.final_message = String(body.final_message || '');
       team.steps = (body.steps || []).map((x, i) => ({
-        pos: i + 1, clue: String(x.clue || ''), qr_id: x.qr_id ? Number(x.qr_id) : null, scanned_at: prev.get(i + 1) || null }));
+        pos: i + 1, clue: String(x.clue || ''), qr_id: x.qr_id ? Number(x.qr_id) : null, scanned_at: (x.qr_id && prev.get(Number(x.qr_id))) || null }));
       await saveTeam(s, team);
       return json({ ok: true });
     }
