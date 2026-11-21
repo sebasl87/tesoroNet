@@ -51,11 +51,29 @@ async function load() {
   data = r.data; build();
 }
 
-function qrOptions(sel) {
+function qrOptions(sel, used = new Set()) {
   let o = '<option value="">—</option>';
-  for (let i = 1; i <= data.qr_count; i++) o += `<option value="${i}" ${sel == i ? 'selected' : ''}>QR #${i}</option>`;
+  for (let i = 1; i <= data.qr_count; i++)
+    if (sel == i || !used.has(String(i))) o += `<option value="${i}" ${sel == i ? 'selected' : ''}>QR #${i}</option>`;
   return o;
 }
+// Cada QR se puede usar una sola vez (en cualquier equipo): los ya elegidos no aparecen en los otros desplegables.
+function usedQrs() {
+  const used = new Map(); // qr -> [{team, row}]
+  document.querySelectorAll('[id^="steps-"] .row').forEach((r) => {
+    const v = r.querySelector('select').value; if (!v) return;
+    if (!used.has(v)) used.set(v, []);
+    used.get(v).push({ team: r.parentNode.id.split('-')[1], pos: r.querySelector('.pos').textContent });
+  });
+  return used;
+}
+function refreshQrSelects() {
+  const used = new Set(usedQrs().keys());
+  document.querySelectorAll('[id^="steps-"] .row select').forEach((sel) => {
+    const v = sel.value; sel.innerHTML = qrOptions(v, used); sel.value = v;
+  });
+}
+document.addEventListener('change', (e) => { if (e.target.matches('[id^="steps-"] select')) refreshQrSelects(); });
 
 function stepRow(t, s, i) {
   return `<div class="row" data-team="${t}"><div class="pos" title="Arrastrar para reordenar">${i + 1}</div>
@@ -96,7 +114,7 @@ document.addEventListener('dragend', () => {
   if (!dragRow) return;
   dragRow.classList.remove('dragging'); dragRow.removeAttribute('draggable'); renum(dragRow.parentNode); dragRow = null;
 });
-function addStep(t) { const box = document.getElementById('steps-' + t); box.insertAdjacentHTML('beforeend', stepRow(t, {}, box.children.length)); }
+function addStep(t) { const box = document.getElementById('steps-' + t); box.insertAdjacentHTML('beforeend', stepRow(t, {}, box.children.length)); refreshQrSelects(); }
 
 function build() {
   root.innerHTML = `<header><h1>🗺️ Búsqueda del Tesoro – Admin</h1>
@@ -115,6 +133,7 @@ function build() {
     <textarea id="final-${t.id}">${esc(t.final_message)}</textarea>
     <p><button id="save-${t.id}" onclick="saveTeam(${t.id})">💾 Guardar ${esc(t.name)}</button> <span id="msg-${t.id}" class="muted"></span></p>
   </div>`).join('')}</div></main>`;
+  refreshQrSelects();
   renderProgress();
 }
 
@@ -139,6 +158,12 @@ async function saveTeam(id) {
   const missing = steps.findIndex((s) => !s.clue.trim() || !s.qr_id);
   const m = document.getElementById('msg-' + id);
   if (missing >= 0) { m.textContent = `⚠️ Falta completar la pista ${missing + 1}`; return; }
+  const teamName = (tid) => document.getElementById('name-' + tid)?.value.trim() || 'otro equipo';
+  for (const [qr, uses] of usedQrs()) {
+    if (uses.length < 2 || !uses.some((u) => u.team == id)) continue;
+    m.textContent = '⚠️ El QR #' + qr + ' está repetido: ' + uses.map((u) => `${teamName(u.team)} pista ${u.pos}`).join(', ');
+    return;
+  }
   const r = await api('/api/admin/teams/' + id, 'PUT', { name: document.getElementById('name-' + id).value, code: document.getElementById('code-' + id).value, final_message: document.getElementById('final-' + id).value, steps });
   m.textContent = r.status === 200 ? '✅ Guardado' : '❌ ' + (r.data.error || 'error');
   if (r.status === 200) refreshProgress();
