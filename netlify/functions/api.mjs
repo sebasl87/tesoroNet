@@ -125,7 +125,7 @@ export default async (req) => {
       team.code = code;
       team.final_message = String(body.final_message || '');
       team.steps = (body.steps || []).map((x, i) => ({
-        pos: i + 1, clue: String(x.clue || ''), qr_id: x.qr_id ? Number(x.qr_id) : null, scanned_at: (x.qr_id && prev.get(Number(x.qr_id))) || null }));
+        pos: i + 1, clue: String(x.clue || ''), location: String(x.location || ''), qr_id: x.qr_id ? Number(x.qr_id) : null, scanned_at: (x.qr_id && prev.get(Number(x.qr_id))) || null }));
       await saveTeam(s, team);
       return json({ ok: true });
     }
